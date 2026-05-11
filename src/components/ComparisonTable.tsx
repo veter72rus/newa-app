@@ -10,28 +10,61 @@ function fmt(val: number | null): string {
 }
 
 function fmtAum(aum: number): string {
-  if (aum >= 1000) return `₪${(aum / 1000).toFixed(1)} מיליארד`;
-  return `₪${aum.toLocaleString('he-IL')} מ'`;
+  if (aum >= 1000) return `₪${(aum / 1000).toFixed(1)}B`;
+  return `₪${aum.toLocaleString('he-IL')}M`;
 }
 
-function yieldClass(val: number | null): string {
-  if (val === null) return 'text-gray-400';
-  if (val >= 15) return 'text-emerald-600 font-semibold';
-  if (val >= 8) return 'text-emerald-500';
-  if (val >= 0) return 'text-gray-700';
-  return 'text-red-500';
+type YieldTier = 'high' | 'mid' | 'low' | 'neg' | 'null';
+
+function yieldTier(val: number | null): YieldTier {
+  if (val === null) return 'null';
+  if (val >= 15) return 'high';
+  if (val >= 8) return 'mid';
+  if (val >= 0) return 'low';
+  return 'neg';
 }
 
-function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) return <span className="text-gray-300 text-xs mr-1">↕</span>;
-  return <span className="text-blue-600 text-xs mr-1">{dir === 'desc' ? '↓' : '↑'}</span>;
+const tierStyles: Record<YieldTier, string> = {
+  high: 'bg-green-50 text-green-700 font-semibold ring-1 ring-green-200',
+  mid: 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100',
+  low: 'bg-gray-50 text-gray-600',
+  neg: 'bg-red-50 text-red-600 ring-1 ring-red-100',
+  null: 'text-gray-300',
+};
+
+function YieldBadge({ val, highlighted }: { val: number | null; highlighted: boolean }) {
+  const tier = yieldTier(val);
+  return (
+    <span
+      className={`inline-block px-2.5 py-1 rounded-md text-sm tabular-nums transition-all ${tierStyles[tier]} ${
+        highlighted ? 'scale-105 shadow-sm' : ''
+      }`}
+    >
+      {fmt(val)}
+    </span>
+  );
 }
 
-const SORT_LABELS: Record<SortKey, string> = {
-  yield1y: 'תשואה 1 שנה',
-  yield3y: 'תשואה 3 שנים',
-  yield5y: 'תשואה 5 שנים',
-  yieldSinceInception: 'מאז הקמה',
+function RankBadge({ rank }: { rank: number }) {
+  if (rank === 1) return <span className="text-amber-500 text-base leading-none">★</span>;
+  if (rank <= 3) return <span className="text-gray-300 text-sm font-mono">{rank}</span>;
+  return <span className="text-gray-200 text-sm font-mono">{rank}</span>;
+}
+
+const TRACK_TYPE_COLORS: Record<string, string> = {
+  'כללי': 'bg-blue-50 text-blue-700',
+  'מניות': 'bg-purple-50 text-purple-700',
+  'אגח': 'bg-amber-50 text-amber-700',
+  'שקלי': 'bg-teal-50 text-teal-700',
+  'S&P 500': 'bg-indigo-50 text-indigo-700',
+  'גלובלי מניות': 'bg-rose-50 text-rose-700',
+};
+
+const COL_LABELS: Record<SortKey, { short: string; long: string }> = {
+  yield1y: { short: '1 שנה', long: 'תשואה — שנה אחת' },
+  yield3y: { short: '3 שנים', long: 'תשואה — 3 שנים' },
+  yield5y: { short: '5 שנים', long: 'תשואה — 5 שנים' },
+  yieldSinceInception: { short: 'מאז הקמה', long: 'תשואה מאז הקמה' },
 };
 
 export default function ComparisonTable() {
@@ -70,145 +103,232 @@ export default function ComparisonTable() {
 
   const sortCols: SortKey[] = ['yield1y', 'yield3y', 'yield5y', 'yieldSinceInception'];
 
+  const topYield = sorted[0]?.[sortKey];
+  const avgYield = useMemo(() => {
+    const vals = filtered.map((m) => m[sortKey]).filter((v): v is number => v !== null);
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }, [filtered, sortKey]);
+
+  const hasActiveFilter = filterHouse !== '' || filterType !== '';
+
   return (
-    <div className="w-full">
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        <div className="flex flex-col gap-1 flex-1">
-          <label className="text-sm font-medium text-gray-600">בית השקעות</label>
-          <select
-            value={filterHouse}
-            onChange={(e) => setFilterHouse(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+    <div className="w-full space-y-5">
+
+      {/* Stats row */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: 'מסלולים', value: filtered.length.toString(), sub: 'בסינון הנוכחי' },
+          { label: 'תשואה מובילה', value: topYield !== null && topYield !== undefined ? fmt(topYield) : '—', sub: COL_LABELS[sortKey].short },
+          { label: 'ממוצע', value: avgYield !== null ? fmt(avgYield) : '—', sub: COL_LABELS[sortKey].short },
+        ].map((stat) => (
+          <div
+            key={stat.label}
+            className="bg-white rounded-xl border border-[var(--border)] px-4 py-3 shadow-sm"
           >
-            <option value="">כל הבתים</option>
+            <p className="text-xs text-[var(--text-muted)] mb-0.5">{stat.label}</p>
+            <p className="text-xl font-bold text-[var(--text-primary)] tabular-nums leading-tight">{stat.value}</p>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">{stat.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Filter bar */}
+      <div className="bg-white rounded-xl border border-[var(--border)] p-4 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-[var(--text-secondary)]">סינון ומיון</span>
+          {hasActiveFilter && (
+            <button
+              onClick={() => { setFilterHouse(''); setFilterType(''); }}
+              className="text-xs text-[var(--accent)] hover:underline transition-colors"
+            >
+              נקה הכל
+            </button>
+          )}
+        </div>
+
+        {/* House filter pills */}
+        <div>
+          <p className="text-xs text-[var(--text-muted)] mb-2">בית השקעות</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setFilterHouse('')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                filterHouse === ''
+                  ? 'bg-[var(--text-primary)] text-white border-[var(--text-primary)]'
+                  : 'bg-white text-[var(--text-secondary)] border-[var(--border)] hover:border-[var(--border-strong)]'
+              }`}
+            >
+              הכל
+            </button>
             {HOUSES.map((h) => (
-              <option key={h} value={h}>{h}</option>
+              <button
+                key={h}
+                onClick={() => setFilterHouse(filterHouse === h ? '' : h)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                  filterHouse === h
+                    ? 'bg-[var(--text-primary)] text-white border-[var(--text-primary)]'
+                    : 'bg-white text-[var(--text-secondary)] border-[var(--border)] hover:border-[var(--border-strong)]'
+                }`}
+              >
+                {h}
+              </button>
             ))}
-          </select>
+          </div>
         </div>
-        <div className="flex flex-col gap-1 flex-1">
-          <label className="text-sm font-medium text-gray-600">סוג מסלול</label>
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value as TrackType | '')}
-            className="border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          >
-            <option value="">כל הסוגים</option>
+
+        {/* Track type filter pills */}
+        <div>
+          <p className="text-xs text-[var(--text-muted)] mb-2">סוג מסלול</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setFilterType('')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                filterType === ''
+                  ? 'bg-[var(--text-primary)] text-white border-[var(--text-primary)]'
+                  : 'bg-white text-[var(--text-secondary)] border-[var(--border)] hover:border-[var(--border-strong)]'
+              }`}
+            >
+              הכל
+            </button>
             {TRACK_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
+              <button
+                key={t}
+                onClick={() => setFilterType(filterType === t ? '' : (t as TrackType))}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                  filterType === t
+                    ? 'bg-[var(--text-primary)] text-white border-[var(--text-primary)]'
+                    : 'bg-white text-[var(--text-secondary)] border-[var(--border)] hover:border-[var(--border-strong)]'
+                }`}
+              >
+                {t}
+              </button>
             ))}
-          </select>
+          </div>
         </div>
-        <div className="flex flex-col gap-1 flex-1 sm:max-w-xs">
-          <label className="text-sm font-medium text-gray-600">מיין לפי</label>
-          <select
-            value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className="border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          >
+
+        {/* Sort pills */}
+        <div>
+          <p className="text-xs text-[var(--text-muted)] mb-2">מיין לפי תשואה</p>
+          <div className="flex flex-wrap gap-2">
             {sortCols.map((k) => (
-              <option key={k} value={k}>{SORT_LABELS[k]}</option>
+              <button
+                key={k}
+                onClick={() => handleSort(k)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all flex items-center gap-1 ${
+                  sortKey === k
+                    ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
+                    : 'bg-white text-[var(--text-secondary)] border-[var(--border)] hover:border-[var(--border-strong)]'
+                }`}
+              >
+                {COL_LABELS[k].short}
+                {sortKey === k && (
+                  <span className="opacity-80">{sortDir === 'desc' ? '↓' : '↑'}</span>
+                )}
+              </button>
             ))}
-          </select>
+          </div>
         </div>
       </div>
 
-      {/* Results count */}
-      <p className="text-sm text-gray-500 mb-3">
-        מציג {sorted.length} מסלולים
-      </p>
-
       {/* Empty state */}
       {sorted.length === 0 && (
-        <div className="text-center py-16 text-gray-400">
-          <div className="text-4xl mb-3">🔍</div>
-          <p className="text-lg">לא נמצאו מסלולים התואמים את הסינון</p>
+        <div className="bg-white rounded-xl border border-[var(--border)] py-16 text-center shadow-sm">
+          <div className="text-5xl mb-4 opacity-30">◎</div>
+          <p className="text-[var(--text-secondary)] font-medium">לא נמצאו מסלולים</p>
+          <p className="text-sm text-[var(--text-muted)] mt-1">נסה לשנות את הסינון</p>
           <button
             onClick={() => { setFilterHouse(''); setFilterType(''); }}
-            className="mt-4 text-blue-600 underline text-sm"
+            className="mt-5 px-4 py-2 rounded-lg bg-[var(--text-primary)] text-white text-sm font-medium hover:opacity-80 transition-opacity"
           >
             נקה סינונים
           </button>
         </div>
       )}
 
-      {/* Table — horizontal scroll on mobile */}
+      {/* Table */}
       {sorted.length > 0 && (
-        <div className="overflow-x-auto -mx-4 sm:mx-0 rounded-none sm:rounded-xl border border-gray-200">
-          <table className="w-full text-sm border-collapse min-w-[640px]">
-            <thead>
-              <tr className="bg-blue-50 text-gray-700">
-                <th className="px-4 py-3 text-right font-semibold sticky right-0 bg-blue-50 z-10 border-b border-gray-200">
-                  בית השקעות
-                </th>
-                <th className="px-4 py-3 text-right font-semibold border-b border-gray-200">
-                  מסלול
-                </th>
-                <th className="px-4 py-3 text-right font-semibold border-b border-gray-200">
-                  סוג
-                </th>
-                {sortCols.map((col) => (
-                  <th
-                    key={col}
-                    onClick={() => handleSort(col)}
-                    className="px-4 py-3 text-left font-semibold border-b border-gray-200 cursor-pointer hover:bg-blue-100 select-none whitespace-nowrap"
-                  >
-                    <span className="flex items-center justify-end gap-1">
-                      <SortIcon active={sortKey === col} dir={sortDir} />
-                      {col === 'yield1y' && '1 שנה'}
-                      {col === 'yield3y' && '3 שנים'}
-                      {col === 'yield5y' && '5 שנים'}
-                      {col === 'yieldSinceInception' && 'מאז הקמה'}
-                    </span>
+        <div className="bg-white rounded-xl border border-[var(--border)] shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse min-w-[680px]">
+              <thead>
+                <tr style={{ background: 'var(--text-primary)' }} className="text-white">
+                  <th className="w-8 px-3 py-3.5 text-center font-medium opacity-40 sticky right-0" style={{ background: 'var(--text-primary)' }}>
+                    #
                   </th>
-                ))}
-                <th className="px-4 py-3 text-left font-semibold border-b border-gray-200 whitespace-nowrap">
-                  היקף נכסים
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((m, i) => (
-                <tr
-                  key={m.id}
-                  className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${
-                    i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
-                  }`}
-                >
-                  <td className="px-4 py-3 font-medium text-gray-800 sticky right-0 bg-inherit z-10">
-                    {m.house}
-                  </td>
-                  <td className="px-4 py-3 text-gray-700">{m.name}</td>
-                  <td className="px-4 py-3">
-                    <span className="inline-block bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full whitespace-nowrap">
-                      {m.trackType}
-                    </span>
-                  </td>
-                  <td className={`px-4 py-3 text-left ${yieldClass(m.yield1y)} ${sortKey === 'yield1y' ? 'bg-blue-50/70' : ''}`}>
-                    {fmt(m.yield1y)}
-                  </td>
-                  <td className={`px-4 py-3 text-left ${yieldClass(m.yield3y)} ${sortKey === 'yield3y' ? 'bg-blue-50/70' : ''}`}>
-                    {fmt(m.yield3y)}
-                  </td>
-                  <td className={`px-4 py-3 text-left ${yieldClass(m.yield5y)} ${sortKey === 'yield5y' ? 'bg-blue-50/70' : ''}`}>
-                    {fmt(m.yield5y)}
-                  </td>
-                  <td className={`px-4 py-3 text-left ${yieldClass(m.yieldSinceInception)} ${sortKey === 'yieldSinceInception' ? 'bg-blue-50/70' : ''}`}>
-                    {fmt(m.yieldSinceInception)}
-                  </td>
-                  <td className="px-4 py-3 text-left text-gray-500 whitespace-nowrap">
-                    {fmtAum(m.aum)}
-                  </td>
+                  <th className="px-4 py-3.5 text-right font-medium sticky" style={{ right: '32px', background: 'var(--text-primary)' }}>
+                    בית השקעות
+                  </th>
+                  <th className="px-4 py-3.5 text-right font-medium opacity-80">מסלול</th>
+                  <th className="px-4 py-3.5 text-right font-medium opacity-80">סוג</th>
+                  {sortCols.map((col) => (
+                    <th
+                      key={col}
+                      onClick={() => handleSort(col)}
+                      className={`px-4 py-3.5 text-left font-medium cursor-pointer select-none whitespace-nowrap transition-opacity ${
+                        sortKey === col ? 'opacity-100' : 'opacity-50 hover:opacity-80'
+                      }`}
+                    >
+                      <span className="flex items-center justify-end gap-1">
+                        {sortKey === col && (
+                          <span className="text-[var(--accent)] text-xs">{sortDir === 'desc' ? '↓' : '↑'}</span>
+                        )}
+                        {COL_LABELS[col].short}
+                      </span>
+                    </th>
+                  ))}
+                  <th className="px-4 py-3.5 text-left font-medium opacity-50 whitespace-nowrap">נכסים</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sorted.map((m, i) => (
+                  <tr
+                    key={m.id}
+                    className={`border-b border-[var(--border)] last:border-0 transition-colors hover:bg-[var(--bg)] group ${
+                      i === 0 ? 'bg-amber-50/30' : ''
+                    }`}
+                  >
+                    <td className="px-3 py-3 text-center sticky right-0 bg-inherit group-hover:bg-[var(--bg)]">
+                      <RankBadge rank={i + 1} />
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-[var(--text-primary)] sticky bg-inherit group-hover:bg-[var(--bg)]" style={{ right: '32px' }}>
+                      {m.house}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--text-secondary)] max-w-[180px]">
+                      <span className="line-clamp-1">{m.name}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-block text-xs px-2.5 py-1 rounded-full font-medium whitespace-nowrap ${
+                        TRACK_TYPE_COLORS[m.trackType] ?? 'bg-gray-50 text-gray-600'
+                      }`}>
+                        {m.trackType}
+                      </span>
+                    </td>
+                    <td className={`px-4 py-3 text-left ${sortKey === 'yield1y' ? 'bg-amber-50/20' : ''}`}>
+                      <YieldBadge val={m.yield1y} highlighted={sortKey === 'yield1y'} />
+                    </td>
+                    <td className={`px-4 py-3 text-left ${sortKey === 'yield3y' ? 'bg-amber-50/20' : ''}`}>
+                      <YieldBadge val={m.yield3y} highlighted={sortKey === 'yield3y'} />
+                    </td>
+                    <td className={`px-4 py-3 text-left ${sortKey === 'yield5y' ? 'bg-amber-50/20' : ''}`}>
+                      <YieldBadge val={m.yield5y} highlighted={sortKey === 'yield5y'} />
+                    </td>
+                    <td className={`px-4 py-3 text-left ${sortKey === 'yieldSinceInception' ? 'bg-amber-50/20' : ''}`}>
+                      <YieldBadge val={m.yieldSinceInception} highlighted={sortKey === 'yieldSinceInception'} />
+                    </td>
+                    <td className="px-4 py-3 text-left text-[var(--text-muted)] text-xs whitespace-nowrap tabular-nums">
+                      {fmtAum(m.aum)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      <p className="text-xs text-gray-400 mt-4 text-center">
-        * הנתונים הם לצורך הדגמה בלבד. אין לראות בהם ייעוץ השקעות.
+      <p className="text-xs text-[var(--text-muted)] text-center pb-2">
+        הנתונים לצורך הדגמה בלבד · אין לראות בהם ייעוץ השקעות · עדכון: מאי 2025
       </p>
     </div>
   );
