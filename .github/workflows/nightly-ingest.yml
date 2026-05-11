@@ -1,0 +1,52 @@
+name: Nightly Hishtalmut Ingestion
+
+on:
+  schedule:
+    # 02:00 UTC daily — data.gov.il publishes monthly data at start of month
+    - cron: '0 2 * * *'
+  workflow_dispatch: # allow manual trigger for backfill
+
+jobs:
+  ingest:
+    name: Ingest hishtalmut snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      # Ephemeral Postgres for CI smoke-test when DATABASE_URL secret is not set.
+      # In production, point DATABASE_URL at a managed Postgres (e.g. Neon, Supabase).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: newa
+          POSTGRES_USER: newa
+          POSTGRES_PASSWORD: newa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ingestion
+        env:
+          # Use the DATABASE_URL secret in production; fall back to ephemeral CI Postgres.
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgres://newa:newa@localhost:5432/newa' }}
+        run: npx ts-node --project tsconfig.scripts.json scripts/ingest-hishtalmut.ts
+
+      - name: Smoke check – top-10 by 3y yield
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgres://newa:newa@localhost:5432/newa' }}
+        run: psql "$DATABASE_URL" -f scripts/smoke-check.sql
